@@ -118,7 +118,7 @@ import kotlin.math.roundToInt
  *
  * GenerativeModel(
  *     modelName = "gemini-2.5-flash",
- *     apiKey = "YOUR_API_KEY"
+ *     apiKey = "BuildConfig.GEMINI_API_KEY"
  * )
  */
 class MainActivity : ComponentActivity() {
@@ -164,7 +164,7 @@ private suspend fun analyzeWithGemini(bitmap: Bitmap): String =
 
         val generativeModel = GenerativeModel(
             modelName = "gemini-2.5-flash",
-            apiKey = "YOUR_API_KEY",
+            apiKey = "BuildConfig.GEMINI_API_KEY",
             systemInstruction = content {
                 text(SYSTEM_INSTRUCTION)
             }
