@@ -31,7 +31,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -61,10 +60,10 @@ import androidx.compose.material3.rememberModalBottomSheetState
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 
 import androidx.compose.ui.Alignment
@@ -74,7 +73,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -88,6 +86,7 @@ import androidx.core.content.ContextCompat
 
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 
 import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.content
@@ -96,7 +95,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-//import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executors
 
 import kotlin.math.roundToInt
@@ -105,28 +103,23 @@ import kotlin.math.roundToInt
 /**
  * Local Eco-Scanner
  *
- * Single-Activity / single-file example using:
+ * CameraX + Jetpack Compose + Gemini image analysis.
  *
- * - Jetpack Compose
- * - Material 3
- * - CameraX
- * - Google Generative AI Android SDK
+ * The Gemini key is loaded from:
  *
- * IMPORTANT:
- * The Google Generative AI Android SDK used here is now deprecated.
- * It is retained because this example intentionally matches the requested:
+ * local.properties
  *
- * GenerativeModel(
- *     modelName = "gemini-2.5-flash",
- *     apiKey = "BuildConfig.GEMINI_API_KEY"
- * )
+ * GEMINI_API_KEY=your_key_here
+ *
+ * and exposed through:
+ *
+ * BuildConfig.GEMINI_API_KEY
  */
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Allows the camera UI to extend behind system bars.
         enableEdgeToEdge()
 
         setContent {
@@ -139,8 +132,12 @@ class MainActivity : ComponentActivity() {
 
 
 /* -------------------------------------------------------------------------- */
-/* Gemini configuration                                                       */
+/* Configuration                                                              */
 /* -------------------------------------------------------------------------- */
+
+private const val GEMINI_MODEL_NAME = "gemini-2.5-flash"
+
+private const val MAX_IMAGE_DIMENSION = 1600
 
 private const val SYSTEM_INSTRUCTION =
     "You are an expert eco-friendly assistant. Analyze this object image. " +
@@ -149,37 +146,84 @@ private const val SYSTEM_INSTRUCTION =
             "Keep responses concise, structured, and easy to read."
 
 
+/* -------------------------------------------------------------------------- */
+/* Gemini                                                                     */
+/* -------------------------------------------------------------------------- */
+
 /**
- * Sends the captured Bitmap to Gemini.
- *
- * The Bitmap is JPEG-compressed first so a high-resolution CameraX image
- * does not unnecessarily increase request size or memory usage.
- *
- * IMPORTANT FOR A REAL RELEASE:
- * Do not publish an APK containing a real Gemini API key. Anyone can extract
- * client-side secrets from an Android APK.
+ * Sends the captured image to Gemini.
  */
-private suspend fun analyzeWithGemini(bitmap: Bitmap): String =
-    withContext(Dispatchers.IO) {
+private suspend fun analyzeWithGemini(
+    bitmap: Bitmap
+): String = withContext(Dispatchers.IO) {
 
-        val generativeModel = GenerativeModel(
-            modelName = "gemini-2.5-flash",
-            apiKey = "BuildConfig.GEMINI_API_KEY",
-            systemInstruction = content {
-                text(SYSTEM_INSTRUCTION)
-            }
+    /*
+     * IMPORTANT:
+     *
+     * Do NOT write:
+     *
+     * apiKey = "BuildConfig.GEMINI_API_KEY"
+     *
+     * The quotes would send the literal text instead of the real key.
+     */
+    val apiKey = BuildConfig.GEMINI_API_KEY.trim()
+
+
+    /*
+     * Fail early with a useful message if Gradle did not load the API key.
+     *
+     * We intentionally never print the actual key.
+     */
+    if (apiKey.isBlank()) {
+        throw IllegalStateException(
+            "Gemini API key was not loaded. " +
+                    "Check GEMINI_API_KEY in local.properties and rebuild the app."
         )
+    }
 
-        val inputContent = content {
-            image(bitmap)
+    if (
+        apiKey == "YOUR_API_KEY" ||
+        apiKey == "BuildConfig.GEMINI_API_KEY"
+    ) {
+        throw IllegalStateException(
+            "Gemini API key is still using a placeholder value."
+        )
+    }
 
-            text(
-                "Analyze the photographed object. " +
-                        "Return only the requested three eco-guidance sections."
-            )
+
+    val generativeModel = GenerativeModel(
+        modelName = GEMINI_MODEL_NAME,
+
+        // This is the actual generated BuildConfig value.
+        apiKey = apiKey,
+
+        systemInstruction = content {
+            text(SYSTEM_INSTRUCTION)
         }
+    )
 
-        val response = generativeModel.generateContent(inputContent)
+
+    /*
+     * The photo has already been reduced to MAX_IMAGE_DIMENSION before this
+     * function is called.
+     */
+    val inputContent = content {
+
+        image(bitmap)
+
+        text(
+            "Analyze the photographed object. " +
+                    "Return only the requested three eco-guidance sections."
+        )
+    }
+
+
+    try {
+
+        val response =
+            generativeModel.generateContent(
+                inputContent
+            )
 
         response.text
             ?.trim()
@@ -187,26 +231,20 @@ private suspend fun analyzeWithGemini(bitmap: Bitmap): String =
             ?: throw IllegalStateException(
                 "Gemini returned an empty response. Please try another photo."
             )
-    }
 
+    } catch (exception: Exception) {
 
-/**
- * Compresses a Bitmap before sending it over the network.
- */
-
-/*
-private fun bitmapToJpeg(bitmap: Bitmap): ByteArray {
-    return ByteArrayOutputStream().use { output ->
-        bitmap.compress(
-            Bitmap.CompressFormat.JPEG,
-            85,
-            output
+        /*
+         * Keep Gemini/network errors readable in the scanner UI.
+         */
+        throw IllegalStateException(
+            exception.message
+                ?: "Gemini analysis failed. Please check your internet connection and try again.",
+            exception
         )
-
-        output.toByteArray()
     }
 }
-*/
+
 
 /* -------------------------------------------------------------------------- */
 /* Main Compose screen                                                        */
@@ -218,18 +256,16 @@ private fun EcoScannerApp() {
 
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val coroutineScope = rememberCoroutineScope()
+
+    val coroutineScope =
+        rememberCoroutineScope()
+
 
     /*
-     * UI STATE
-     *
-     * Every simple screen value is backed by remember { mutableStateOf(...) }.
-     *
-     * Changes to these states automatically cause the relevant composables
-     * to recompose.
+     * Camera permission state.
      */
-
     val hasCameraPermission = remember {
+
         mutableStateOf(
             ContextCompat.checkSelfPermission(
                 context,
@@ -238,64 +274,98 @@ private fun EcoScannerApp() {
         )
     }
 
-    // Tracks whether Android has already displayed a permission request.
-    val permissionRequested = remember {
-        mutableStateOf(false)
-    }
 
-    // CameraX writes its active ImageCapture instance here.
-    val imageCapture = remember {
-        mutableStateOf<ImageCapture?>(null)
-    }
-
-    // Bitmap displayed inside the result bottom sheet.
-    val capturedBitmap = remember {
-        mutableStateOf<Bitmap?>(null)
-    }
-
-    // Gemini's textual response.
-    val geminiResult = remember {
-        mutableStateOf<String?>(null)
-    }
-
-    // True while CameraX is capturing or Gemini is analyzing.
-    val isLoading = remember {
-        mutableStateOf(false)
-    }
-
-    // Controls whether the result ModalBottomSheet is visible.
-    val showResultSheet = remember {
-        mutableStateOf(false)
-    }
-
-    // Any camera/network/API failure is surfaced here.
-    val errorMessage = remember {
-        mutableStateOf<String?>(null)
-    }
+    /*
+     * Tracks whether Android has already shown the permission dialog.
+     */
+    val permissionRequested =
+        remember {
+            mutableStateOf(false)
+        }
 
 
     /*
-     * Camera operations should not perform bitmap work on the UI thread.
+     * CameraX ImageCapture instance.
      */
-    val cameraExecutor = remember {
-        Executors.newSingleThreadExecutor()
-    }
+    val imageCapture =
+        remember {
+            mutableStateOf<ImageCapture?>(null)
+        }
+
+
+    /*
+     * Captured image shown in the result sheet.
+     */
+    val capturedBitmap =
+        remember {
+            mutableStateOf<Bitmap?>(null)
+        }
+
+
+    /*
+     * Gemini result text.
+     */
+    val geminiResult =
+        remember {
+            mutableStateOf<String?>(null)
+        }
+
+
+    /*
+     * Loading state:
+     *
+     * false = scanner ready
+     * true  = capturing/analyzing
+     */
+    val isLoading =
+        remember {
+            mutableStateOf(false)
+        }
+
+
+    /*
+     * Controls ModalBottomSheet visibility.
+     */
+    val showResultSheet =
+        remember {
+            mutableStateOf(false)
+        }
+
+
+    /*
+     * Human-readable camera/Gemini errors.
+     */
+    val errorMessage =
+        remember {
+            mutableStateOf<String?>(null)
+        }
+
+
+    /*
+     * CameraX capture executor.
+     */
+    val cameraExecutor =
+        remember {
+            Executors.newSingleThreadExecutor()
+        }
+
 
     DisposableEffect(Unit) {
+
         onDispose {
             cameraExecutor.shutdown()
         }
     }
 
 
-    /*
-     * Android runtime permission contract.
-     *
-     * The callback directly updates Compose permission state.
-     */
+    /* ---------------------------------------------------------------------- */
+    /* Camera permission launcher                                             */
+    /* ---------------------------------------------------------------------- */
+
     val cameraPermissionLauncher =
         rememberLauncherForActivityResult(
-            contract = ActivityResultContracts.RequestPermission()
+            contract =
+                ActivityResultContracts.RequestPermission()
         ) { granted ->
 
             hasCameraPermission.value = granted
@@ -307,10 +377,12 @@ private fun EcoScannerApp() {
 
 
     /*
-     * Ask for the camera permission on first launch.
+     * Request permission when the app starts.
      */
     LaunchedEffect(Unit) {
+
         if (!hasCameraPermission.value) {
+
             permissionRequested.value = true
 
             cameraPermissionLauncher.launch(
@@ -321,125 +393,163 @@ private fun EcoScannerApp() {
 
 
     /*
-     * If the user leaves the app to grant permission through Android Settings,
-     * re-check permission when this Activity resumes.
+     * Re-check permission if the user returns from Android Settings.
      */
-    DisposableEffect(lifecycleOwner, context) {
+    DisposableEffect(
+        lifecycleOwner,
+        context
+    ) {
 
-        val observer = LifecycleEventObserver { _, event ->
+        val observer =
+            LifecycleEventObserver { _, event ->
 
-            if (event == Lifecycle.Event.ON_RESUME) {
-                hasCameraPermission.value =
-                    ContextCompat.checkSelfPermission(
-                        context,
-                        Manifest.permission.CAMERA
-                    ) == PackageManager.PERMISSION_GRANTED
+                if (event == Lifecycle.Event.ON_RESUME) {
+
+                    hasCameraPermission.value =
+                        ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.CAMERA
+                        ) == PackageManager.PERMISSION_GRANTED
+                }
             }
-        }
 
-        lifecycleOwner.lifecycle.addObserver(observer)
+
+        lifecycleOwner.lifecycle.addObserver(
+            observer
+        )
+
 
         onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
+
+            lifecycleOwner.lifecycle.removeObserver(
+                observer
+            )
         }
     }
 
 
-    /*
-     * Resets scan-related state.
-     *
-     * CameraX remains bound to the Activity lifecycle, so resetting these
-     * values immediately makes the scanner ready for another item.
-     */
+    /* ---------------------------------------------------------------------- */
+    /* Reset scanner                                                          */
+    /* ---------------------------------------------------------------------- */
+
     fun resetScanner() {
+
         showResultSheet.value = false
+
         capturedBitmap.value = null
+
         geminiResult.value = null
+
         errorMessage.value = null
+
         isLoading.value = false
     }
 
 
-    /*
-     * CAPTURE + GEMINI PIPELINE
-     */
+    /* ---------------------------------------------------------------------- */
+    /* Capture + Gemini                                                       */
+    /* ---------------------------------------------------------------------- */
+
     fun captureAndAnalyze() {
 
         if (isLoading.value) {
             return
         }
 
-        val currentImageCapture = imageCapture.value
+
+        val currentImageCapture =
+            imageCapture.value
+
 
         if (currentImageCapture == null) {
+
             errorMessage.value =
                 "Camera is still starting. Please try again."
+
             return
         }
 
-        // The loading overlay appears immediately after tapping capture.
+
+        /*
+         * Show loading immediately.
+         */
         isLoading.value = true
+
         errorMessage.value = null
 
-        currentImageCapture.takePicture(
-            cameraExecutor,
-            object : ImageCapture.OnImageCapturedCallback() {
 
-                override fun onCaptureSuccess(image: ImageProxy) {
+        currentImageCapture.takePicture(
+
+            cameraExecutor,
+
+            object :
+                ImageCapture.OnImageCapturedCallback() {
+
+
+                override fun onCaptureSuccess(
+                    image: ImageProxy
+                ) {
 
                     try {
-                        /*
-                         * ImageProxy.toBitmap() gives us a Bitmap from the
-                         * CameraX capture.
-                         *
-                         * CameraX provides rotation metadata separately, so
-                         * rotate the Bitmap before displaying/uploading it.
-                         */
-                        val rawBitmap = image.toBitmap()
-
-                        val rotatedBitmap = rotateBitmap(
-                            source = rawBitmap,
-                            rotationDegrees = image.imageInfo.rotationDegrees
-                        )
 
                         /*
-                         * Camera sensors can produce very large photos.
-                         *
-                         * 1600 px is plenty for ordinary object recognition
-                         * while substantially reducing memory/network usage.
+                         * CameraX ImageProxy → Bitmap.
                          */
-                        val preparedBitmap = downscaleBitmap(
-                            bitmap = rotatedBitmap,
-                            maximumDimension = 1600
-                        )
+                        val rawBitmap =
+                            image.toBitmap()
+
+
+                        /*
+                         * Apply CameraX rotation metadata.
+                         */
+                        val rotatedBitmap =
+                            rotateBitmap(
+                                source = rawBitmap,
+                                rotationDegrees =
+                                    image.imageInfo.rotationDegrees
+                            )
+
+
+                        /*
+                         * Reduce very large camera images before Gemini upload.
+                         */
+                        val preparedBitmap =
+                            downscaleBitmap(
+                                bitmap = rotatedBitmap
+                            )
+
 
                         coroutineScope.launch {
 
-                            // Save image for the future bottom sheet.
-                            capturedBitmap.value = preparedBitmap
+                            capturedBitmap.value =
+                                preparedBitmap
+
 
                             try {
-                                /*
-                                 * analyzeWithGemini() is suspendable, so this
-                                 * does not block Compose's UI thread.
-                                 */
+
                                 val result =
-                                    analyzeWithGemini(preparedBitmap)
+                                    analyzeWithGemini(
+                                        preparedBitmap
+                                    )
 
-                                geminiResult.value = result
 
-                                // Hide the loading overlay.
-                                isLoading.value = false
+                                geminiResult.value =
+                                    result
 
-                                /*
-                                 * Adding ModalBottomSheet to composition causes
-                                 * Material 3 to animate it upward automatically.
-                                 */
-                                showResultSheet.value = true
+
+                                isLoading.value =
+                                    false
+
+
+                                showResultSheet.value =
+                                    true
+
 
                             } catch (exception: Exception) {
 
-                                isLoading.value = false
+                                isLoading.value =
+                                    false
+
 
                                 errorMessage.value =
                                     exception.message
@@ -447,30 +557,39 @@ private fun EcoScannerApp() {
                             }
                         }
 
-                    } catch (exception: Exception) {
+
+                    } catch (_: Exception) {
 
                         coroutineScope.launch {
-                            isLoading.value = false
+
+                            isLoading.value =
+                                false
+
 
                             errorMessage.value =
                                 "Could not process the captured photo."
                         }
 
+
                     } finally {
 
                         /*
-                         * ImageProxy MUST always be closed or CameraX can stop
-                         * delivering future captures.
+                         * Always release the CameraX ImageProxy.
                          */
                         image.close()
                     }
                 }
 
 
-                override fun onError(exception: ImageCaptureException) {
+                override fun onError(
+                    exception: ImageCaptureException
+                ) {
 
                     coroutineScope.launch {
-                        isLoading.value = false
+
+                        isLoading.value =
+                            false
+
 
                         errorMessage.value =
                             exception.message
@@ -482,20 +601,33 @@ private fun EcoScannerApp() {
     }
 
 
+    /* ---------------------------------------------------------------------- */
+    /* Main content                                                           */
+    /* ---------------------------------------------------------------------- */
+
     Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = Color.Black
+        modifier =
+            Modifier.fillMaxSize(),
+        color =
+            Color.Black
     ) {
 
         if (hasCameraPermission.value) {
 
             ScannerScreen(
-                imageCaptureState = imageCapture,
-                isLoading = isLoading.value,
-                errorMessage = errorMessage.value,
+                imageCaptureState =
+                    imageCapture,
+
+                isLoading =
+                    isLoading.value,
+
+                errorMessage =
+                    errorMessage.value,
+
                 onCapture = {
                     captureAndAnalyze()
                 },
+
                 onCameraError = { message ->
                     errorMessage.value = message
                 }
@@ -504,34 +636,38 @@ private fun EcoScannerApp() {
         } else {
 
             PermissionDeniedScreen(
-                permissionRequested = permissionRequested.value,
+
+                permissionRequested =
+                    permissionRequested.value,
+
                 onGrantPermission = {
 
-                    val activity = context as? ComponentActivity
+                    val activity =
+                        context as? ComponentActivity
 
-                    /*
-                     * shouldShowRequestPermissionRationale() normally becomes
-                     * false if Android will no longer show the dialog.
-                     *
-                     * In that situation, "Grant Permission" opens the app's
-                     * Android settings page instead.
-                     */
+
                     val canRequestAgain =
                         activity == null ||
-                                ActivityCompat.shouldShowRequestPermissionRationale(
-                                    activity,
-                                    Manifest.permission.CAMERA
-                                )
+                                ActivityCompat
+                                    .shouldShowRequestPermissionRationale(
+                                        activity,
+                                        Manifest.permission.CAMERA
+                                    )
+
 
                     if (
                         canRequestAgain ||
                         !permissionRequested.value
                     ) {
-                        permissionRequested.value = true
+
+                        permissionRequested.value =
+                            true
+
 
                         cameraPermissionLauncher.launch(
                             Manifest.permission.CAMERA
                         )
+
                     } else {
 
                         context.openAppSettings()
@@ -541,9 +677,10 @@ private fun EcoScannerApp() {
         }
 
 
-        /*
-         * RESULT BOTTOM SHEET
-         */
+        /* ------------------------------------------------------------------ */
+        /* Result bottom sheet                                                */
+        /* ------------------------------------------------------------------ */
+
         if (
             showResultSheet.value &&
             capturedBitmap.value != null &&
@@ -555,18 +692,32 @@ private fun EcoScannerApp() {
                     skipPartiallyExpanded = true
                 )
 
+
             ModalBottomSheet(
+
                 onDismissRequest = {
                     resetScanner()
                 },
-                sheetState = sheetState,
-                containerColor = Color(0xFFF8FAF7),
-                contentColor = Color(0xFF172018)
+
+                sheetState =
+                    sheetState,
+
+                containerColor =
+                    Color(0xFFF8FAF7),
+
+                contentColor =
+                    Color(0xFF172018)
+
             ) {
 
                 ResultSheetContent(
-                    bitmap = capturedBitmap.value!!,
-                    result = geminiResult.value!!,
+
+                    bitmap =
+                        capturedBitmap.value!!,
+
+                    result =
+                        geminiResult.value!!,
+
                     onScanAnother = {
                         resetScanner()
                     }
@@ -578,7 +729,7 @@ private fun EcoScannerApp() {
 
 
 /* -------------------------------------------------------------------------- */
-/* Camera scanner                                                             */
+/* Scanner screen                                                             */
 /* -------------------------------------------------------------------------- */
 
 @Composable
@@ -591,80 +742,144 @@ private fun ScannerScreen(
 ) {
 
     Box(
-        modifier = Modifier.fillMaxSize()
+        modifier =
+            Modifier.fillMaxSize()
     ) {
 
+
         CameraPreview(
-            imageCaptureState = imageCaptureState,
-            onCameraError = onCameraError
+            imageCaptureState =
+                imageCaptureState,
+
+            onCameraError =
+                onCameraError
         )
 
 
         /*
-         * Dark translucent header background to maintain readability over
-         * light camera scenes.
+         * Header readability overlay.
          */
         Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(140.dp)
-                .background(Color.Black.copy(alpha = 0.28f))
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .height(140.dp)
+                    .background(
+                        Color.Black.copy(
+                            alpha = 0.28f
+                        )
+                    )
         )
 
 
-        /* App heading */
+        /* ------------------------------------------------------------------ */
+        /* Header                                                             */
+        /* ------------------------------------------------------------------ */
 
         Column(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .statusBarsPadding()
-                .padding(top = 18.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+            modifier =
+                Modifier
+                    .align(
+                        Alignment.TopCenter
+                    )
+                    .statusBarsPadding()
+                    .padding(
+                        top = 18.dp
+                    ),
+
+            horizontalAlignment =
+                Alignment.CenterHorizontally
         ) {
 
+
             Text(
-                text = "♻  Local Eco-Scanner",
-                color = Color.White,
-                fontSize = 21.sp,
-                fontWeight = FontWeight.Bold
+                text =
+                    "♻  Local Eco-Scanner",
+
+                color =
+                    Color.White,
+
+                fontSize =
+                    21.sp,
+
+                fontWeight =
+                    FontWeight.Bold
             )
+
 
             Spacer(
-                modifier = Modifier.height(6.dp)
+                modifier =
+                    Modifier.height(6.dp)
             )
 
+
             Text(
-                text = "Center an item and take a photo",
-                color = Color.White.copy(alpha = 0.82f),
-                fontSize = 14.sp
+                text =
+                    "Center an item and take a photo",
+
+                color =
+                    Color.White.copy(
+                        alpha = 0.82f
+                    ),
+
+                fontSize =
+                    14.sp
             )
         }
 
 
-        /* Minimal scanner frame */
+        /* ------------------------------------------------------------------ */
+        /* Scanner frame                                                      */
+        /* ------------------------------------------------------------------ */
 
         Box(
-            modifier = Modifier
-                .align(Alignment.Center)
-                .fillMaxWidth(0.78f)
-                .aspectRatio(0.78f)
-                .border(
-                    width = 2.dp,
-                    color = Color.White.copy(alpha = 0.8f),
-                    shape = RoundedCornerShape(28.dp)
-                )
+            modifier =
+                Modifier
+                    .align(
+                        Alignment.Center
+                    )
+                    .fillMaxWidth(
+                        0.78f
+                    )
+                    .aspectRatio(
+                        0.78f
+                    )
+                    .border(
+                        width =
+                            2.dp,
+
+                        color =
+                            Color.White.copy(
+                                alpha = 0.8f
+                            ),
+
+                        shape =
+                            RoundedCornerShape(
+                                28.dp
+                            )
+                    )
         )
 
 
-        /* Capture controls */
+        /* ------------------------------------------------------------------ */
+        /* Capture controls                                                   */
+        /* ------------------------------------------------------------------ */
 
         Column(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(bottom = 26.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+            modifier =
+                Modifier
+                    .align(
+                        Alignment.BottomCenter
+                    )
+                    .navigationBarsPadding()
+                    .padding(
+                        bottom = 26.dp
+                    ),
+
+            horizontalAlignment =
+                Alignment.CenterHorizontally
         ) {
+
 
             Text(
                 text =
@@ -673,46 +888,64 @@ private fun ScannerScreen(
                     } else {
                         "Tap to scan"
                     },
-                color = Color.White,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium
+
+                color =
+                    Color.White,
+
+                fontSize =
+                    14.sp,
+
+                fontWeight =
+                    FontWeight.Medium
             )
+
 
             Spacer(
-                modifier = Modifier.height(14.dp)
+                modifier =
+                    Modifier.height(14.dp)
             )
 
+
             CaptureButton(
-                enabled = !isLoading,
-                onClick = onCapture
+                enabled =
+                    !isLoading,
+
+                onClick =
+                    onCapture
             )
         }
 
 
-        /*
-         * API/camera errors remain visible without destroying the camera
-         * preview, allowing the user to immediately retry.
-         */
+        /* ------------------------------------------------------------------ */
+        /* Error                                                              */
+        /* ------------------------------------------------------------------ */
+
         errorMessage?.let { message ->
 
             ErrorBanner(
-                message = message,
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .statusBarsPadding()
-                    .padding(
-                        start = 20.dp,
-                        end = 20.dp,
-                        top = 90.dp
-                    )
+
+                message =
+                    message,
+
+                modifier =
+                    Modifier
+                        .align(
+                            Alignment.TopCenter
+                        )
+                        .statusBarsPadding()
+                        .padding(
+                            start = 20.dp,
+                            end = 20.dp,
+                            top = 90.dp
+                        )
             )
         }
 
 
-        /*
-         * Loading overlay appears from the moment capture starts until Gemini
-         * either succeeds or throws an exception.
-         */
+        /* ------------------------------------------------------------------ */
+        /* Loading                                                            */
+        /* ------------------------------------------------------------------ */
+
         if (isLoading) {
 
             LoadingOverlay()
@@ -731,27 +964,27 @@ private fun CameraPreview(
     onCameraError: (String) -> Unit
 ) {
 
-    val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
+    val context =
+        LocalContext.current
 
-    /*
-     * PreviewView is CameraX's recommended View-based preview surface.
-     *
-     * AndroidView lets it live underneath the Compose overlay.
-     */
-    val previewView = remember {
 
-        PreviewView(context).apply {
-            scaleType = PreviewView.ScaleType.FILL_CENTER
+    val lifecycleOwner =
+        LocalLifecycleOwner.current
 
-            /*
-             * COMPATIBLE uses a texture-backed implementation where possible,
-             * which works reliably underneath Compose overlays.
-             */
-            implementationMode =
-                PreviewView.ImplementationMode.COMPATIBLE
+
+    val previewView =
+        remember {
+
+            PreviewView(context).apply {
+
+                scaleType =
+                    PreviewView.ScaleType.FILL_CENTER
+
+
+                implementationMode =
+                    PreviewView.ImplementationMode.COMPATIBLE
+            }
         }
-    }
 
 
     DisposableEffect(
@@ -759,14 +992,25 @@ private fun CameraPreview(
         previewView
     ) {
 
-        var cameraProvider: ProcessCameraProvider? = null
-        var disposed = false
+        var cameraProvider:
+                ProcessCameraProvider? = null
+
+
+        var disposed =
+            false
+
 
         val cameraProviderFuture =
-            ProcessCameraProvider.getInstance(context)
+            ProcessCameraProvider.getInstance(
+                context
+            )
+
 
         val mainExecutor =
-            ContextCompat.getMainExecutor(context)
+            ContextCompat.getMainExecutor(
+                context
+            )
+
 
         cameraProviderFuture.addListener({
 
@@ -774,56 +1018,62 @@ private fun CameraPreview(
                 return@addListener
             }
 
+
             try {
 
                 val provider =
                     cameraProviderFuture.get()
 
-                cameraProvider = provider
+
+                cameraProvider =
+                    provider
 
 
                 val preview =
                     Preview.Builder()
                         .build()
                         .also {
+
                             it.setSurfaceProvider(
                                 previewView.surfaceProvider
                             )
                         }
 
 
-                val imageCapture =
+                val captureUseCase =
                     ImageCapture.Builder()
                         .setCaptureMode(
-                            ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY
+                            ImageCapture
+                                .CAPTURE_MODE_MINIMIZE_LATENCY
                         )
                         .build()
 
 
-                /*
-                 * Remove any previously bound use cases before binding this
-                 * scanner's Preview + ImageCapture.
-                 */
                 provider.unbindAll()
 
 
                 provider.bindToLifecycle(
+
                     lifecycleOwner,
-                    CameraSelector.DEFAULT_BACK_CAMERA,
+
+                    CameraSelector
+                        .DEFAULT_BACK_CAMERA,
+
                     preview,
-                    imageCapture
+
+                    captureUseCase
                 )
 
 
-                /*
-                 * Expose the bound capture use case to our scanner button.
-                 */
                 imageCaptureState.value =
-                    imageCapture
+                    captureUseCase
+
 
             } catch (exception: Exception) {
 
-                imageCaptureState.value = null
+                imageCaptureState.value =
+                    null
+
 
                 onCameraError(
                     exception.message
@@ -836,9 +1086,13 @@ private fun CameraPreview(
 
         onDispose {
 
-            disposed = true
+            disposed =
+                true
 
-            imageCaptureState.value = null
+
+            imageCaptureState.value =
+                null
+
 
             cameraProvider?.unbindAll()
         }
@@ -849,7 +1103,9 @@ private fun CameraPreview(
         factory = {
             previewView
         },
-        modifier = Modifier.fillMaxSize()
+
+        modifier =
+            Modifier.fillMaxSize()
     )
 }
 
@@ -865,43 +1121,68 @@ private fun CaptureButton(
 ) {
 
     Box(
-        modifier = Modifier
-            .size(94.dp)
-            .semantics {
-                contentDescription = "Capture item photo"
-            }
-            .clip(CircleShape)
-            .background(
-                Color.Black.copy(alpha = 0.28f)
-            )
-            .border(
-                width = 4.dp,
-                color =
-                    if (enabled) {
-                        Color.White
-                    } else {
-                        Color.White.copy(alpha = 0.45f)
-                    },
-                shape = CircleShape
-            )
-            .clickable(
-                enabled = enabled,
-                onClick = onClick
-            ),
-        contentAlignment = Alignment.Center
+
+        modifier =
+            Modifier
+                .size(94.dp)
+                .semantics {
+
+                    contentDescription =
+                        "Capture item photo"
+                }
+                .clip(
+                    CircleShape
+                )
+                .background(
+                    Color.Black.copy(
+                        alpha = 0.28f
+                    )
+                )
+                .border(
+
+                    width =
+                        4.dp,
+
+                    color =
+                        if (enabled) {
+                            Color.White
+                        } else {
+                            Color.White.copy(
+                                alpha = 0.45f
+                            )
+                        },
+
+                    shape =
+                        CircleShape
+                )
+                .clickable(
+                    enabled =
+                        enabled,
+
+                    onClick =
+                        onClick
+                ),
+
+        contentAlignment =
+            Alignment.Center
     ) {
 
+
         Box(
-            modifier = Modifier
-                .size(70.dp)
-                .clip(CircleShape)
-                .background(
-                    if (enabled) {
-                        Color(0xFF79D58A)
-                    } else {
-                        Color(0xFF6D766E)
-                    }
-                )
+            modifier =
+                Modifier
+                    .size(70.dp)
+                    .clip(
+                        CircleShape
+                    )
+                    .background(
+
+                        if (enabled) {
+                            Color(0xFF79D58A)
+                        } else {
+                            Color(0xFF6D766E)
+                        }
+                    )
         )
     }
 }
@@ -918,22 +1199,40 @@ private fun PermissionDeniedScreen(
 ) {
 
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0xFF101713))
-            .statusBarsPadding()
-            .navigationBarsPadding()
-            .padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Color(0xFF101713)
+                )
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .padding(
+                    32.dp
+                ),
+
+        horizontalAlignment =
+            Alignment.CenterHorizontally,
+
+        verticalArrangement =
+            Arrangement.Center
     ) {
 
+
         Box(
-            modifier = Modifier
-                .size(92.dp)
-                .clip(CircleShape)
-                .background(Color(0xFF22372A)),
-            contentAlignment = Alignment.Center
+            modifier =
+                Modifier
+                    .size(92.dp)
+                    .clip(
+                        CircleShape
+                    )
+                    .background(
+                        Color(0xFF22372A)
+                    ),
+
+            contentAlignment =
+                Alignment.Center
         ) {
 
             Text(
@@ -942,55 +1241,106 @@ private fun PermissionDeniedScreen(
             )
         }
 
+
         Spacer(
-            modifier = Modifier.height(28.dp)
+            modifier =
+                Modifier.height(28.dp)
         )
+
 
         Text(
-            text = "Camera access required",
-            color = Color.White,
-            fontSize = 25.sp,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center
+            text =
+                "Camera access required",
+
+            color =
+                Color.White,
+
+            fontSize =
+                25.sp,
+
+            fontWeight =
+                FontWeight.Bold,
+
+            textAlign =
+                TextAlign.Center
         )
 
+
         Spacer(
-            modifier = Modifier.height(12.dp)
+            modifier =
+                Modifier.height(12.dp)
         )
+
 
         Text(
             text =
                 if (permissionRequested) {
+
                     "Eco-Scanner needs camera access to photograph items for recycling analysis."
+
                 } else {
+
                     "Allow camera access to start scanning recyclable items."
                 },
-            color = Color.White.copy(alpha = 0.72f),
-            fontSize = 16.sp,
-            lineHeight = 23.sp,
-            textAlign = TextAlign.Center
+
+            color =
+                Color.White.copy(
+                    alpha = 0.72f
+                ),
+
+            fontSize =
+                16.sp,
+
+            lineHeight =
+                23.sp,
+
+            textAlign =
+                TextAlign.Center
         )
+
 
         Spacer(
-            modifier = Modifier.height(30.dp)
+            modifier =
+                Modifier.height(30.dp)
         )
 
+
         Button(
-            onClick = onGrantPermission,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Color(0xFF80DC91),
-                contentColor = Color(0xFF102114)
-            ),
-            shape = RoundedCornerShape(18.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(56.dp)
+
+            onClick =
+                onGrantPermission,
+
+            colors =
+                ButtonDefaults.buttonColors(
+
+                    containerColor =
+                        Color(0xFF80DC91),
+
+                    contentColor =
+                        Color(0xFF102114)
+                ),
+
+            shape =
+                RoundedCornerShape(
+                    18.dp
+                ),
+
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+
         ) {
 
             Text(
-                text = "Grant Permission",
-                fontWeight = FontWeight.Bold,
-                fontSize = 16.sp
+                text =
+                    "Grant Permission",
+
+                fontWeight =
+                    FontWeight.Bold,
+
+                fontSize =
+                    16.sp
             )
         }
     }
@@ -998,62 +1348,107 @@ private fun PermissionDeniedScreen(
 
 
 /* -------------------------------------------------------------------------- */
-/* Loading                                                                    */
+/* Loading overlay                                                            */
 /* -------------------------------------------------------------------------- */
 
 @Composable
 private fun LoadingOverlay() {
 
     Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(
-                Color.Black.copy(alpha = 0.48f)
-            ),
-        contentAlignment = Alignment.Center
+
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Color.Black.copy(
+                        alpha = 0.48f
+                    )
+                ),
+
+        contentAlignment =
+            Alignment.Center
     ) {
 
+
         Card(
-            colors = CardDefaults.cardColors(
-                containerColor =
-                    Color(0xEE162019)
-            ),
-            shape = RoundedCornerShape(24.dp)
+
+            colors =
+                CardDefaults.cardColors(
+                    containerColor =
+                        Color(0xEE162019)
+                ),
+
+            shape =
+                RoundedCornerShape(
+                    24.dp
+                )
+
         ) {
 
+
             Column(
-                modifier = Modifier.padding(
-                    horizontal = 32.dp,
-                    vertical = 28.dp
-                ),
-                horizontalAlignment = Alignment.CenterHorizontally
+
+                modifier =
+                    Modifier.padding(
+                        horizontal = 32.dp,
+                        vertical = 28.dp
+                    ),
+
+                horizontalAlignment =
+                    Alignment.CenterHorizontally
             ) {
 
+
                 CircularProgressIndicator(
-                    color = Color(0xFF81DA91),
+
+                    color =
+                        Color(0xFF81DA91),
+
                     trackColor =
-                        Color.White.copy(alpha = 0.15f)
+                        Color.White.copy(
+                            alpha = 0.15f
+                        )
                 )
+
 
                 Spacer(
-                    modifier = Modifier.height(18.dp)
+                    modifier =
+                        Modifier.height(18.dp)
                 )
 
+
                 Text(
-                    text = "Analyzing your item",
-                    color = Color.White,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 17.sp
+                    text =
+                        "Analyzing your item",
+
+                    color =
+                        Color.White,
+
+                    fontWeight =
+                        FontWeight.SemiBold,
+
+                    fontSize =
+                        17.sp
                 )
+
 
                 Spacer(
-                    modifier = Modifier.height(6.dp)
+                    modifier =
+                        Modifier.height(6.dp)
                 )
 
+
                 Text(
-                    text = "Checking recycling and upcycling options…",
-                    color = Color.White.copy(alpha = 0.68f),
-                    fontSize = 13.sp
+                    text =
+                        "Checking recycling and upcycling options…",
+
+                    color =
+                        Color.White.copy(
+                            alpha = 0.68f
+                        ),
+
+                    fontSize =
+                        13.sp
                 )
             }
         }
@@ -1072,34 +1467,67 @@ private fun ErrorBanner(
 ) {
 
     Card(
-        modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor =
-                Color(0xEE3D211E)
-        ),
-        shape = RoundedCornerShape(18.dp)
+
+        modifier =
+            modifier.fillMaxWidth(),
+
+        colors =
+            CardDefaults.cardColors(
+                containerColor =
+                    Color(0xEE3D211E)
+            ),
+
+        shape =
+            RoundedCornerShape(
+                18.dp
+            )
+
     ) {
 
+
         Column(
-            modifier = Modifier.padding(16.dp)
+            modifier =
+                Modifier.padding(
+                    16.dp
+                )
         ) {
 
+
             Text(
-                text = "Something went wrong",
-                color = Color.White,
-                fontWeight = FontWeight.Bold,
-                fontSize = 15.sp
+                text =
+                    "Something went wrong",
+
+                color =
+                    Color.White,
+
+                fontWeight =
+                    FontWeight.Bold,
+
+                fontSize =
+                    15.sp
             )
+
 
             Spacer(
-                modifier = Modifier.height(4.dp)
+                modifier =
+                    Modifier.height(4.dp)
             )
 
+
             Text(
-                text = message,
-                color = Color.White.copy(alpha = 0.82f),
-                fontSize = 13.sp,
-                lineHeight = 18.sp
+                text =
+                    message,
+
+                color =
+                    Color.White.copy(
+                        alpha = 0.82f
+                    ),
+
+                fontSize =
+                    13.sp,
+
+                lineHeight =
+                    18.sp
             )
         }
     }
@@ -1118,139 +1546,209 @@ private fun ResultSheetContent(
 ) {
 
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .verticalScroll(
-                rememberScrollState()
-            )
-            .padding(
-                start = 22.dp,
-                end = 22.dp,
-                bottom = 28.dp
-            )
+
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .verticalScroll(
+                    rememberScrollState()
+                )
+                .padding(
+                    start = 22.dp,
+                    end = 22.dp,
+                    bottom = 28.dp
+                )
     ) {
 
-        Text(
-            text = "Eco Analysis",
-            color = Color(0xFF172018),
-            fontWeight = FontWeight.Bold,
-            fontSize = 26.sp
-        )
-
-        Spacer(
-            modifier = Modifier.height(6.dp)
-        )
 
         Text(
-            text = "Gemini's recycling and upcycling guidance",
-            color = Color(0xFF5B675C),
-            fontSize = 14.sp
+            text =
+                "Eco Analysis",
+
+            color =
+                Color(0xFF172018),
+
+            fontWeight =
+                FontWeight.Bold,
+
+            fontSize =
+                26.sp
         )
+
 
         Spacer(
-            modifier = Modifier.height(20.dp)
+            modifier =
+                Modifier.height(6.dp)
         )
 
 
-        /*
-         * Visual result: display the exact image used for Gemini analysis.
-         */
+        Text(
+            text =
+                "Gemini's recycling and upcycling guidance",
+
+            color =
+                Color(0xFF5B675C),
+
+            fontSize =
+                14.sp
+        )
+
+
+        Spacer(
+            modifier =
+                Modifier.height(20.dp)
+        )
+
+
         Image(
-            bitmap = bitmap.asImageBitmap(),
-            contentDescription = "Scanned item",
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(230.dp)
-                .clip(
-                    RoundedCornerShape(24.dp)
-                ),
-            contentScale = ContentScale.Crop
+
+            bitmap =
+                bitmap.asImageBitmap(),
+
+            contentDescription =
+                "Scanned item",
+
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .height(230.dp)
+                    .clip(
+                        RoundedCornerShape(
+                            24.dp
+                        )
+                    ),
+
+            contentScale =
+                ContentScale.Crop
         )
+
 
         Spacer(
-            modifier = Modifier.height(24.dp)
+            modifier =
+                Modifier.height(24.dp)
         )
 
 
-        /*
-         * Render Gemini's three requested sections.
-         *
-         * A small formatter makes Markdown-style headers cleaner without
-         * introducing a third-party Markdown dependency.
-         */
         EcoResultText(
-            result = result
+            result =
+                result
         )
 
+
         Spacer(
-            modifier = Modifier.height(22.dp)
+            modifier =
+                Modifier.height(22.dp)
         )
+
 
         Card(
-            colors = CardDefaults.cardColors(
-                containerColor =
-                    Color(0xFFEAF4EB)
-            ),
-            shape = RoundedCornerShape(18.dp)
+
+            colors =
+                CardDefaults.cardColors(
+                    containerColor =
+                        Color(0xFFEAF4EB)
+                ),
+
+            shape =
+                RoundedCornerShape(
+                    18.dp
+                )
+
         ) {
+
 
             Text(
                 text =
                     "Recycling programs vary by municipality. " +
                             "Confirm local collection rules when the material is uncertain.",
-                color = Color(0xFF405044),
-                fontSize = 13.sp,
-                lineHeight = 18.sp,
-                modifier = Modifier.padding(16.dp)
+
+                color =
+                    Color(0xFF405044),
+
+                fontSize =
+                    13.sp,
+
+                lineHeight =
+                    18.sp,
+
+                modifier =
+                    Modifier.padding(
+                        16.dp
+                    )
             )
         }
 
+
         Spacer(
-            modifier = Modifier.height(24.dp)
+            modifier =
+                Modifier.height(24.dp)
         )
 
+
         Button(
-            onClick = onScanAnother,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(56.dp),
-            shape = RoundedCornerShape(18.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor =
-                    Color(0xFF1E6C37),
-                contentColor =
-                    Color.White
-            )
+
+            onClick =
+                onScanAnother,
+
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
+
+            shape =
+                RoundedCornerShape(
+                    18.dp
+                ),
+
+            colors =
+                ButtonDefaults.buttonColors(
+
+                    containerColor =
+                        Color(0xFF1E6C37),
+
+                    contentColor =
+                        Color.White
+                )
+
         ) {
 
+
             Text(
-                text = "Scan Another Item",
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold
+                text =
+                    "Scan Another Item",
+
+                fontSize =
+                    16.sp,
+
+                fontWeight =
+                    FontWeight.Bold
             )
         }
     }
 }
 
 
-/**
- * Lightweight formatter for Gemini's structured response.
- *
- * It deliberately avoids a Markdown dependency so the project remains
- * Compose + Android SDK + CameraX + Gemini only.
- */
+/* -------------------------------------------------------------------------- */
+/* Gemini text formatter                                                      */
+/* -------------------------------------------------------------------------- */
+
 @Composable
 private fun EcoResultText(
     result: String
 ) {
 
-    val lines = result.lines()
+    val lines =
+        result.lines()
+
 
     Column(
         verticalArrangement =
-            Arrangement.spacedBy(8.dp)
+            Arrangement.spacedBy(
+                8.dp
+            )
     ) {
+
 
         lines.forEach { rawLine ->
 
@@ -1264,43 +1762,65 @@ private fun EcoResultText(
                     .removeSuffix("**")
                     .trim()
 
+
             if (line.isEmpty()) {
 
                 Spacer(
-                    modifier = Modifier.height(3.dp)
+                    modifier =
+                        Modifier.height(
+                            3.dp
+                        )
                 )
 
             } else {
+
 
                 val isSectionHeader =
                     line.startsWith("1.") ||
                             line.startsWith("2.") ||
                             line.startsWith("3.") ||
-                            line.startsWith("Is it Recyclable?", ignoreCase = true) ||
-                            line.startsWith("Proper Disposal Steps", ignoreCase = true) ||
-                            line.startsWith("Creative Upcycling Ideas", ignoreCase = true)
+                            line.startsWith(
+                                "Is it Recyclable?",
+                                ignoreCase = true
+                            ) ||
+                            line.startsWith(
+                                "Proper Disposal Steps",
+                                ignoreCase = true
+                            ) ||
+                            line.startsWith(
+                                "Creative Upcycling Ideas",
+                                ignoreCase = true
+                            )
+
 
                 Text(
-                    text = line,
+
+                    text =
+                        line,
+
                     color =
                         if (isSectionHeader) {
                             Color(0xFF17642F)
                         } else {
                             Color(0xFF263229)
                         },
+
                     fontSize =
                         if (isSectionHeader) {
                             18.sp
                         } else {
                             15.sp
                         },
+
                     fontWeight =
                         if (isSectionHeader) {
                             FontWeight.Bold
                         } else {
                             FontWeight.Normal
                         },
-                    lineHeight = 22.sp
+
+                    lineHeight =
+                        22.sp
                 )
             }
         }
@@ -1312,9 +1832,6 @@ private fun EcoResultText(
 /* Bitmap helpers                                                             */
 /* -------------------------------------------------------------------------- */
 
-/**
- * Applies CameraX's rotation metadata to the captured Bitmap.
- */
 private fun rotateBitmap(
     source: Bitmap,
     rotationDegrees: Int
@@ -1324,12 +1841,15 @@ private fun rotateBitmap(
         return source
     }
 
+
     val matrix =
         Matrix().apply {
+
             postRotate(
                 rotationDegrees.toFloat()
             )
         }
+
 
     return Bitmap.createBitmap(
         source,
@@ -1344,13 +1864,10 @@ private fun rotateBitmap(
 
 
 /**
- * Reduces enormous camera images before storing/sending them.
- *
- * Aspect ratio is preserved.
+ * Reduces camera images before uploading them.
  */
 private fun downscaleBitmap(
-    bitmap: Bitmap,
-    maximumDimension: Int
+    bitmap: Bitmap
 ): Bitmap {
 
     val largestDimension =
@@ -1359,23 +1876,31 @@ private fun downscaleBitmap(
             bitmap.height
         )
 
-    if (largestDimension <= maximumDimension) {
+
+    if (
+        largestDimension <=
+        MAX_IMAGE_DIMENSION
+    ) {
         return bitmap
     }
 
+
     val scale =
-        maximumDimension.toFloat() /
+        MAX_IMAGE_DIMENSION.toFloat() /
                 largestDimension.toFloat()
+
 
     val newWidth =
         (bitmap.width * scale)
             .roundToInt()
             .coerceAtLeast(1)
 
+
     val newHeight =
         (bitmap.height * scale)
             .roundToInt()
             .coerceAtLeast(1)
+
 
     return Bitmap.createScaledBitmap(
         bitmap,
@@ -1387,7 +1912,7 @@ private fun downscaleBitmap(
 
 
 /* -------------------------------------------------------------------------- */
-/* Android settings helper                                                    */
+/* Android Settings helper                                                    */
 /* -------------------------------------------------------------------------- */
 
 private fun Context.openAppSettings() {
@@ -1395,23 +1920,28 @@ private fun Context.openAppSettings() {
     val intent =
         Intent(
             Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+
             Uri.fromParts(
                 "package",
                 packageName,
                 null
             )
         ).apply {
+
             addFlags(
                 Intent.FLAG_ACTIVITY_NEW_TASK
             )
         }
 
-    startActivity(intent)
+
+    startActivity(
+        intent
+    )
 }
 
 
 /* -------------------------------------------------------------------------- */
-/* Minimal Material 3 theme                                                   */
+/* Theme                                                                      */
 /* -------------------------------------------------------------------------- */
 
 @Composable
@@ -1421,15 +1951,29 @@ private fun EcoScannerTheme(
 
     val colors =
         darkColorScheme(
-            primary = Color(0xFF80DC91),
-            onPrimary = Color(0xFF102114),
-            background = Color(0xFF101713),
-            surface = Color(0xFF172019),
-            onSurface = Color.White
+
+            primary =
+                Color(0xFF80DC91),
+
+            onPrimary =
+                Color(0xFF102114),
+
+            background =
+                Color(0xFF101713),
+
+            surface =
+                Color(0xFF172019),
+
+            onSurface =
+                Color.White
         )
 
+
     MaterialTheme(
-        colorScheme = colors,
-        content = content
+        colorScheme =
+            colors,
+
+        content =
+            content
     )
 }
