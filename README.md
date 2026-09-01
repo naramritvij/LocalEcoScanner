@@ -191,7 +191,7 @@ Connect a compatible Android device or start an emulator with a configured back 
 For better results, photograph one item at a time in good lighting, keep the full object visible, and avoid cluttered backgrounds.
 
 ## Project structure
-
+---
 LocalEcoScanner/
 ├── app/
 │   ├── build.gradle.kts                  # Android app configuration and API-key injection
@@ -211,7 +211,7 @@ LocalEcoScanner/
 ├── build.gradle.kts                       # Root build configuration
 ├── settings.gradle.kts                    # Repositories and module registration
 └── gradle.properties                      # Shared Gradle settings
-
+---
 ## Implementation notes
 
 ### Application design
