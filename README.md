@@ -1,8 +1,8 @@
 <div align="center">
 
-# â™»ï¸ Local Eco-Scanner
+♻️ Local Eco-Scanner
 
-### Location-aware recycling guidance from a single photo
+Location-aware recycling guidance from a single photo
 
 [![Platform](https://img.shields.io/badge/Platform-Android-3DDC84?logo=android&logoColor=white)](https://developer.android.com/)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.3.20-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org/)
@@ -14,8 +14,8 @@ Local Eco-Scanner is a native Android application that uses the device camera an
 
 </div>
 
-> [!IMPORTANT]
-> The app provides AI-generated guidance, not official municipal instructions. Recycling programs can change, and users should verify uncertain or safety-critical disposal rules with their municipality.
+[!IMPORTANT]
+The app provides AI-generated guidance, not official municipal instructions. Recycling programs can change, and users should verify uncertain or safety-critical disposal rules with their municipality.
 
 ## Table of contents
 
