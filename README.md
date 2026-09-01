@@ -192,27 +192,25 @@ For better results, photograph one item at a time in good lighting, keep the ful
 
 ## Project structure
 
-```text
 LocalEcoScanner/
-â”œâ”€â”€ app/
-â”‚   â”œâ”€â”€ build.gradle.kts                  # Android app configuration and API-key injection
-â”‚   â”œâ”€â”€ proguard-rules.pro                # Release shrinker configuration
-â”‚   â””â”€â”€ src/
-â”‚       â”œâ”€â”€ main/
-â”‚       â”‚   â”œâ”€â”€ AndroidManifest.xml        # Permissions, camera requirement, launcher activity
-â”‚       â”‚   â”œâ”€â”€ java/com/example/localecoscanner/
-â”‚       â”‚   â”‚   â”œâ”€â”€ MainActivity.kt        # App state, UI, CameraX, Gemini, and persistence
-â”‚       â”‚   â”‚   â””â”€â”€ ui/theme/              # Generated Compose theme resources
-â”‚       â”‚   â””â”€â”€ res/                       # Icons, strings, colours, themes, and backup rules
-â”‚       â”œâ”€â”€ test/                          # Local JVM tests
-â”‚       â””â”€â”€ androidTest/                   # Instrumented Android tests
-â”œâ”€â”€ gradle/
-â”‚   â”œâ”€â”€ libs.versions.toml                 # Central dependency and plugin versions
-â”‚   â””â”€â”€ wrapper/                           # Gradle wrapper configuration
-â”œâ”€â”€ build.gradle.kts                       # Root build configuration
-â”œâ”€â”€ settings.gradle.kts                    # Repositories and module registration
-â””â”€â”€ gradle.properties                      # Shared Gradle settings
-```
+├── app/
+│   ├── build.gradle.kts                  # Android app configuration and API-key injection
+│   ├── proguard-rules.pro                # Release shrinker configuration
+│   └── src/
+│       ├── main/
+│       │   ├── AndroidManifest.xml        # Permissions, camera requirement, launcher activity
+│       │   ├── java/com/example/localecoscanner/
+│       │   │   ├── MainActivity.kt        # App state, UI, CameraX, Gemini, and persistence
+│       │   │   └── ui/theme/              # Generated Compose theme resources
+│       │   └── res/                       # Icons, strings, colours, themes, and backup rules
+│       ├── test/                          # Local JVM tests
+│       └── androidTest/                   # Instrumented Android tests
+├── gradle/
+│   ├── libs.versions.toml                 # Central dependency and plugin versions
+│   └── wrapper/                           # Gradle wrapper configuration
+├── build.gradle.kts                       # Root build configuration
+├── settings.gradle.kts                    # Repositories and module registration
+└── gradle.properties                      # Shared Gradle settings
 
 ## Implementation notes
 
