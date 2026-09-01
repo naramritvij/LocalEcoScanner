@@ -343,6 +343,7 @@ Developed by **Ritvij Naram**.
 
 - GitHub: [@naramritvij](https://github.com/naramritvij)
 - Project: [github.com/naramritvij/LocalEcoScanner](https://github.com/naramritvij/LocalEcoScanner)
+- Email: [naram.r@northeastern.edu]
 
 ---
 
